@@ -1,0 +1,110 @@
+# ansible/roles/postgres_master/tasks/main.yml
+
+- name: Установить gnupg
+  apt:
+    name: gnupg
+    state: present
+    update_cache: yes
+
+- name: Импортировать GPG-ключ репозитория PostgreSQL
+  apt_key:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    state: present
+
+- name: Добавить официальный репозиторий PostgreSQL
+  apt_repository:
+    repo: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    state: present
+    filename: "pgdg"
+
+- name: Обновить кеш пакетов
+  apt:
+    update_cache: yes
+
+- name: Установка PostgreSQL
+  apt:
+    name:
+      - "postgresql-{{ postgres_version }}"
+      - "postgresql-contrib-{{ postgres_version }}"
+    state: present
+
+- name: Настройка wal_level
+  lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+    regexp: '^#?wal_level'
+    line: "wal_level = 'replica'"
+  notify: Restart PostgreSQL
+
+- name: Настройка listen_addresses
+  lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+    regexp: '^#?listen_addresses'
+    line: "listen_addresses = '*'"
+  notify: Restart PostgreSQL
+
+- name: Создание пользователя репликации (через shell)
+  become: true
+  shell: |
+    sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='{{ replication_user }}'" | grep -q 1 || \
+    sudo -u postgres psql -c "CREATE ROLE {{ replication_user }} WITH REPLICATION LOGIN ENCRYPTED PASSWORD '{{ replication_password }}';"
+  args:
+    executable: /bin/bash
+
+- name: Разрешить доступ всем хостам к репликации (dev)
+  become: true
+  lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
+    line: "host replication {{ replication_user }} 0.0.0.0/0 scram-sha-256"
+    insertafter: EOF
+  notify: Restart PostgreSQL
+
+- name: Создание базы данных и пользователя через shell
+  become: true
+  block:
+    - name: Проверка и создание пользователя
+      shell: |
+        sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='{{ sysadmin_user }}'" | grep -q 1 || \
+        sudo -u postgres psql -c "CREATE ROLE {{ sysadmin_user }} WITH LOGIN ENCRYPTED PASSWORD '{{ sysadmin_password }}';"
+      args:
+        executable: /bin/bash
+
+    - name: Проверка и создание базы данных
+      shell: |
+        sudo -u postgres psql -lqt | cut -d \| -f 1 | grep -qw {{ sysadmin_db }} || \
+        sudo -u postgres createdb -O {{ sysadmin_user }} {{ sysadmin_db }}
+      args:
+        executable: /bin/bash
+
+- name: Разрешение подключения sysadmin
+  lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
+    line: "host {{ sysadmin_db }} {{ sysadmin_user }} 0.0.0.0/0 scram-sha-256"
+    insertafter: EOF
+  notify: Restart PostgreSQL
+
+- name: Загрузка схемы и данных
+  become: true
+  block:
+    - name: Скачать schema.sql
+      get_url:
+        url: https://sysadmin.education-services.ru/downloads/schema.sql
+        dest: /tmp/schema.sql
+        mode: '0644'
+
+    - name: Скачать data.sql
+      get_url:
+        url: https://sysadmin.education-services.ru/downloads/data.sql
+        dest: /tmp/data.sql
+        mode: '0644'
+
+    - name: Импортировать schema.sql
+      shell: |
+        sudo -u postgres psql -d {{ sysadmin_db }} -f /tmp/schema.sql
+      args:
+        executable: /bin/bash
+
+    - name: Импортировать data.sql
+      shell: |
+        sudo -u postgres psql -d {{ sysadmin_db }} -f /tmp/data.sql
+      args:
+        executable: /bin/bash

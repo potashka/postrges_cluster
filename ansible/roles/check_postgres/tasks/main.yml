@@ -1,0 +1,152 @@
+# ansible/roles/check_postgres/tasks/main.yml
+- name: Проверка pg_hba.conf на наличие repuser (pg_master)
+  shell: grep repuser /etc/postgresql/{{ postgres_version }}/main/pg_hba.conf
+  when: inventory_hostname in groups['pg_master']
+  register: repuser_check
+  ignore_errors: true
+
+- debug:
+    var: repuser_check.stdout_lines
+  when: inventory_hostname in groups['pg_master']
+
+- name: Проверка wal_level (pg_master)
+  shell: grep wal_level /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+  when: inventory_hostname in groups['pg_master']
+  register: wal_level_check
+
+- debug:
+    var: wal_level_check.stdout_lines
+  when: inventory_hostname in groups['pg_master']
+
+- name: Проверка sysadmin в pg_hba.conf (pg_master)
+  shell: grep sysadmin /etc/postgresql/{{ postgres_version }}/main/pg_hba.conf
+  when: inventory_hostname in groups['pg_master']
+  register: sysadmin_pg_hba
+
+- debug:
+    var: sysadmin_pg_hba.stdout_lines
+  when: inventory_hostname in groups['pg_master']
+
+- name: Проверка listen_addresses (pg_master)
+  shell: grep listen /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+  when: inventory_hostname in groups['pg_master']
+  register: listen_check
+
+- debug:
+    var: listen_check.stdout_lines
+  when: inventory_hostname in groups['pg_master']
+
+- name: Проверка "SELECT * FROM студенты LIMIT 5" (pg_master)
+  shell: |
+    psql -h 127.0.0.1 -U {{ sysadmin_user }} -d {{ sysadmin_db }} -c "SELECT * FROM студенты LIMIT 5;"
+  environment:
+    PGPASSWORD: "{{ sysadmin_password }}"
+  when: inventory_hostname in groups['pg_master']
+  register: select_students
+
+- debug:
+    var: select_students.stdout_lines
+  when: inventory_hostname in groups['pg_master']
+
+- name: Проверка hot_standby (pg_standby)
+  shell: grep hot_standby /etc/postgresql/{{ postgres_version }}/main/postgresql.conf
+  when: inventory_hostname in groups['pg_standby']
+  register: hot_standby_check
+
+- debug:
+    var: hot_standby_check.stdout_lines
+  when: inventory_hostname in groups['pg_standby']
+
+- name: Проверка sysadmin в pg_hba.conf (pg_standby)
+  shell: grep sysadmin /etc/postgresql/{{ postgres_version }}/main/pg_hba.conf
+  when: inventory_hostname in groups['pg_standby']
+  register: standby_pg_hba
+
+- debug:
+    var: standby_pg_hba.stdout_lines
+  when: inventory_hostname in groups['pg_standby']
+
+- name: Проверка SELECT * FROM студенты LIMIT 5 (pg_standby)
+  shell: |
+    psql -h 127.0.0.1 -U {{ sysadmin_user }} -d {{ sysadmin_db }} -c "SELECT * FROM студенты LIMIT 5;"
+  environment:
+    PGPASSWORD: "{{ sysadmin_password }}"
+  when: inventory_hostname in groups['pg_standby']
+  register: standby_students
+
+- debug:
+    var: standby_students.stdout_lines
+  when: inventory_hostname in groups['pg_standby']
+
+- name: Проверка COUNT(*) FROM студенты (pg_standby)
+  shell: |
+    psql -h 127.0.0.1 -U {{ sysadmin_user }} -d {{ sysadmin_db }} -c "SELECT COUNT(*) FROM студенты;"
+  environment:
+    PGPASSWORD: "{{ sysadmin_password }}"
+  when: inventory_hostname in groups['pg_standby']
+  register: standby_count
+
+- debug:
+    var: standby_count.stdout_lines
+  when: inventory_hostname in groups['pg_standby']
+
+- name: Проверка WHERE id=3 FROM студенты (pg_standby)
+  shell: |
+    psql -h 127.0.0.1 -U {{ sysadmin_user }} -d {{ sysadmin_db }} -c "SELECT * FROM студенты WHERE id=3;"
+  environment:
+    PGPASSWORD: "{{ sysadmin_password }}"
+  when: inventory_hostname in groups['pg_standby']
+  register: standby_id3
+
+- debug:
+    var: standby_id3.stdout_lines
+  when: inventory_hostname in groups['pg_standby']
+
+- name: Проверка режима работы (pg_standby)
+  shell: |
+    sudo -u postgres psql -d {{ sysadmin_db }} -c "SELECT pg_is_in_recovery();"
+  when: inventory_hostname in groups['pg_standby']
+  register: standby_recovery
+  changed_when: false
+
+- debug:
+    var: standby_recovery.stdout_lines
+  when: inventory_hostname in groups['pg_standby']
+
+- name: Сохранить результат проверки в файл (pg_master и pg_standby)
+  copy:
+    content: |
+      ==== {{ inventory_hostname }} ====
+      repuser_check:
+      {{ repuser_check.stdout_lines | default([]) | join('\n') }}
+
+      wal_level_check:
+      {{ wal_level_check.stdout_lines | default([]) | join('\n') }}
+
+      sysadmin_pg_hba:
+      {{ sysadmin_pg_hba.stdout_lines | default([]) | join('\n') }}
+
+      listen_check:
+      {{ listen_check.stdout_lines | default([]) | join('\n') }}
+
+      select_students:
+      {{ select_students.stdout_lines | default([]) | join('\n') }}
+
+      hot_standby_check:
+      {{ hot_standby_check.stdout_lines | default([]) | join('\n') }}
+
+      standby_pg_hba:
+      {{ standby_pg_hba.stdout_lines | default([]) | join('\n') }}
+
+      standby_students:
+      {{ standby_students.stdout_lines | default([]) | join('\n') }}
+
+      standby_count:
+      {{ standby_count.stdout_lines | default([]) | join('\n') }}
+
+      standby_id3:
+      {{ standby_id3.stdout_lines | default([]) | join('\n') }}
+
+    dest: "/home/ubuntu/check_postgres_{{ inventory_hostname }}.log"
+  when: inventory_hostname in groups['pg_master'] or inventory_hostname in groups['pg_standby']
+

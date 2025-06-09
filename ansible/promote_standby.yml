@@ -1,0 +1,47 @@
+- name: Promote standby and update student record
+  hosts: pg-standby
+  become: true
+  vars:
+    student_fullname: "Потанин Алексей Владиславович"  # ← Замени на своё ФИО
+    student_id: 3
+
+  tasks:
+    - name: Promote standby cluster (только если сервер в режиме standby)
+      shell: |
+        if sudo -u postgres psql -d sysadmin_db -tAc "SELECT pg_is_in_recovery()" | grep -q t; then
+          echo "Promoting..."
+          pg_ctlcluster 14 main promote
+        else
+          echo "Already promoted"
+        fi
+      register: promote_result
+      changed_when: "'Promoting...' in promote_result.stdout"
+      failed_when: false
+
+    - name: Wait for PostgreSQL to leave recovery mode
+      shell: |
+        until sudo -u postgres psql -d sysadmin_db -tAc "SELECT pg_is_in_recovery()" | grep -q f; do
+          sleep 1
+        done
+      retries: 10
+      delay: 2
+      register: wait_recovery
+      until: wait_recovery.rc == 0
+
+    - name: Insert test student
+      shell: |
+        sudo -u postgres psql -d sysadmin_db -c "INSERT INTO студенты VALUES ({{ student_id }}, 'Тестовый пользователь', 1);"
+      ignore_errors: true  # если уже есть запись — не падаем
+
+    - name: Update student full name
+      shell: |
+        sudo -u postgres psql -d sysadmin_db -c "UPDATE студенты SET фио = '{{ student_fullname }}' WHERE id = {{ student_id }};"
+
+    - name: Проверка записи
+      shell: |
+        sudo -u postgres psql -d sysadmin_db -c "SELECT * FROM студенты WHERE id = {{ student_id }};"
+      register: student_check
+
+    - name: Вывод результата проверки
+      debug:
+        var: student_check.stdout_lines

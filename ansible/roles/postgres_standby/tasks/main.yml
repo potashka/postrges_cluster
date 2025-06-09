@@ -1,0 +1,77 @@
+# ansible/roles/postgres_standby/tasks/main.yml
+
+- name: Установить gnupg
+  apt:
+    name: gnupg
+    state: present
+    update_cache: yes
+
+- name: Импортировать GPG-ключ репозитория PostgreSQL
+  apt_key:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    state: present
+
+- name: Добавить официальный репозиторий PostgreSQL
+  apt_repository:
+    repo: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    state: present
+    filename: "pgdg"
+
+- name: Обновить кеш пакетов
+  apt:
+    update_cache: yes
+
+- name: Установка PostgreSQL
+  apt:
+    name:
+      - "postgresql-{{ postgres_version }}"
+      - "postgresql-contrib-{{ postgres_version }}"
+    state: present
+
+- name: Настройка hot_standby
+  lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/postgresql.conf"
+    regexp: '^#?hot_standby'
+    line: "hot_standby = on"
+  notify: Restart PostgreSQL
+
+- name: Остановка PostgreSQL
+  systemd:
+    name: postgresql
+    state: stopped
+
+- name: Очистка каталога данных
+  become: true
+  file:
+    path: "{{ pg_data_dir }}"
+    state: absent
+
+- name: Создание резервной копии с мастера
+  become: true
+  shell: |
+    PGPASSWORD="{{ replication_password }}" \
+    pg_basebackup -h 10.128.0.35 \
+                  -D {{ pg_data_dir }} \
+                  -U {{ replication_user }} \
+                  -v -R
+  args:
+    executable: /bin/bash
+
+- name: Убедиться, что каталог принадлежит postgres
+  become: true
+  file:
+    path: "{{ pg_data_dir }}"
+    owner: postgres
+    group: postgres
+    recurse: yes
+
+- name: Разрешение подключения sysadmin
+  lineinfile:
+    path: "/etc/postgresql/{{ postgres_version }}/main/pg_hba.conf"
+    line: "host {{ sysadmin_db }} {{ sysadmin_user }} 0.0.0.0/0 scram-sha-256"
+    insertafter: EOF
+
+- name: Запуск PostgreSQL
+  systemd:
+    name: postgresql
+    state: started

@@ -1,0 +1,8 @@
+# terraform/terraform.tfvars.example
+yc_cloud_id = ""
+yc_folder_id = ""
+yc_zone = "ru-central1-a"
+instance_image = "fd80qm01ah03dkqb14lc"
+service_account_key_file = ""
+instance_user = "ubuntu"
+ssh_public_key = ""

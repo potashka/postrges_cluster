@@ -1,0 +1,17 @@
+- name: Установка master
+  hosts: pg_master
+  become: true
+  roles:
+    - postgres_master
+
+- name: Установка standby
+  hosts: pg_standby
+  become: true
+  roles:
+    - postgres_standby
+
+- name: Установка клиента
+  hosts: pg_client
+  become: true
+  roles:
+    - postgres_client

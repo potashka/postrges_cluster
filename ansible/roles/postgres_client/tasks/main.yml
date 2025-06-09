@@ -1,0 +1,35 @@
+# ansible/roles/postgres_client/tasks/main.yml
+- name: Установить gnupg
+  apt:
+    name: gnupg
+    state: present
+    update_cache: yes
+
+- name: Импортировать GPG-ключ репозитория PostgreSQL
+  apt_key:
+    url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
+    state: present
+
+- name: Добавить официальный репозиторий PostgreSQL
+  apt_repository:
+    repo: "deb http://apt.postgresql.org/pub/repos/apt {{ ansible_distribution_release }}-pgdg main"
+    state: present
+    filename: "pgdg"
+
+- name: Обновить кеш пакетов
+  apt:
+    update_cache: yes
+
+- name: Установка клиента PostgreSQL
+  apt:
+    name: "postgresql-client-{{ postgres_version }}"
+    state: present
+
+- name: Проверка подключения к master
+  shell: |
+    psql -h 10.128.0.35 -U {{ sysadmin_user }} -d {{ sysadmin_db }} -c "SELECT count(*) FROM студенты;"
+  environment:
+    PGPASSWORD: "{{ sysadmin_password }}"
+  register: pg_client_test_output
+  failed_when: pg_client_test_output.rc != 0
+  changed_when: false

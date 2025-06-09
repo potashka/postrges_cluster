@@ -1,0 +1,5 @@
+- name: Проверка PostgreSQL-кластера
+  hosts: postgres_cluster
+  become: true
+  roles:
+    - check_postgres
